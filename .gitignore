@@ -4,8 +4,30 @@ __pycache__/
 build/
 dist/
 wheels/
-src/data/
-*.egg-info
+*.egg-info/
+
+# Local data and generated artifacts
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
 *.csv
-# Virtual environments
-.venv
+!experiments/log.csv
+!submissions/*.csv
+*.parquet
+*.feather
+*.pkl
+*.joblib
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Virtual environments and local configuration
+.venv/
+.env
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
