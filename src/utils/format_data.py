@@ -88,3 +88,88 @@ def add_lag_features(train_df, test_df, attributes=['Sales', 'Customers'], lag_d
     test_filtered = get_lags(test_filtered)
 
     return train_filtered, test_filtered
+
+import pandas as pd
+import numpy as np
+
+def add_calendar_and_rolling_features(train_df, test_df, attributes=['Sales', 'Customers'], start_day=43, window_size=7):
+    """
+    Ajoute les variables calendaires et les moyennes/écarts-types mobiles 
+    (ex: de J-43 à J-49) pour Sales et Customers, sans aucun lag simple.
+    """
+    train_df = train_df.copy()
+    test_df = test_df.copy()
+    
+    # 1. Conversion des dates
+    train_df['Date_time'] = pd.to_datetime(train_df['Date_time'])
+    test_df['Date_time'] = pd.to_datetime(test_df['Date_time'])
+
+    # --- 2. VARIABLES CALENDAIRES ("le numéro du jour 365 et tout") ---
+    def add_calendar(target_df):
+        df_out = target_df.copy()
+        df_out['DayOfYear'] = df_out['Date_time'].dt.dayofyear
+        df_out['DayOfMonth'] = df_out['Date_time'].dt.day
+        df_out['WeekOfYear'] = df_out['Date_time'].dt.isocalendar().week.astype(int)
+        df_out['Month'] = df_out['Date_time'].dt.month
+        df_out['Year'] = df_out['Date_time'].dt.year
+        df_out['Is_Month_Start'] = df_out['Date_time'].dt.is_month_start.astype(int)
+        df_out['Is_Month_End'] = df_out['Date_time'].dt.is_month_end.astype(int)
+        return df_out
+
+    train_df = add_calendar(train_df)
+    test_df = add_calendar(test_df)
+
+    # --- 3. MOYENNES ET ÉCARTS-TYPES MOBILES (Sales & Customers) ---
+    # Récupération de l'historique complet pour la jointure
+    cols_to_keep = ['Store', 'Date_time'] + list(attributes)
+    histo = train_df[cols_to_keep].copy().set_index(['Store', 'Date_time'])
+
+    def compute_rolling(target_df):
+        target_df = target_df.copy()
+        fill_values = {}
+
+        for attr in attributes:
+            window_values = []
+            for i in range(window_size):
+                lag = start_day + i  # ex: de 43 à 49
+                target_date = target_df['Date_time'] - pd.Timedelta(days=lag)
+                keys = list(zip(target_df['Store'], target_date))
+                
+                lag_data = histo.reindex(keys)
+                window_values.append(lag_data[attr].values)
+            
+            # Matrice de la fenêtre glissante
+            window_matrix = np.column_stack(window_values)
+            
+            mean_col = f"{attr}_rolling_mean_{start_day}_{start_day + window_size - 1}"
+            std_col = f"{attr}_rolling_std_{start_day}_{start_day + window_size - 1}"
+            
+            target_df[mean_col] = np.nanmean(window_matrix, axis=1)
+            target_df[std_col] = np.nanstd(window_matrix, axis=1)
+            
+            fill_values[mean_col] = 0
+            fill_values[std_col] = 0
+
+        target_df.fillna(fill_values, inplace=True)
+        return target_df
+
+    # --- FILTRAGE AUTOMATIQUE DU CUTOFF ---
+    # Le jour le plus ancien qu'on va aller chercher est (start_day + window_size - 1)
+    max_lag_needed = start_day + window_size - 1  # ex: 43 + 7 - 1 = 49 jours
+    min_histo_date = train_df['Date_time'].min()
+    cutoff_date = min_histo_date + pd.Timedelta(days=max_lag_needed)
+    
+    print(f"Décalage maximum requis : {max_lag_needed} jours")
+    print(f"Filtrage automatique du train à partir du : {cutoff_date.strftime('%Y-%m-%d')}")
+
+    # Filtrage du train, test intact
+    train_filtered = train_df[train_df['Date_time'] >= cutoff_date].copy()
+    test_filtered = test_df.copy()
+
+    print("Calcul des stats mobiles pour le train...")
+    train_filtered = compute_rolling(train_filtered)
+
+    print("Calcul des stats mobiles pour le test...")
+    test_filtered = compute_rolling(test_filtered)
+
+    return train_filtered, test_filtered
